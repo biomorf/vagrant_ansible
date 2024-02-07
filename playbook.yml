@@ -1,0 +1,18 @@
+- hosts: all
+  tags: always
+  become: true
+  gather_facts: true
+    #  pre_tasks:
+  tasks:
+  - name: users | ub | create .ssh directory
+    tags: dotfiles,ub,ssh,users
+    become: true
+    file:
+      path: "{{ item.dir }}"
+      state: directory
+        #owner: root
+      owner: vagrant
+      group: root
+      mode: 0700
+    with_items:
+      - { dir: '/anstest' }

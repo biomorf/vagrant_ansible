@@ -1,0 +1,154 @@
+# vi: set filetype=dockerfile :
+##### https://dev.to/mattdark/using-docker-as-provider-for-vagrant-10me
+#FROM docker.io/library/ubuntu:jammy-20231004
+#FROM docker.io/ubuntu:jammy-20231004 AS vagrant
+FROM docker.io/ubuntu AS vagrant
+
+MAINTAINER Andrey Maslennikov
+
+ARG USER=vagrant
+### set argument with default value
+#ARG DOCKER_GID=121
+ARG DOCKER_GID=107
+### deb proxy
+ARG HTTP_PROXY="http://10.0.2.2:8000"
+
+ENV DEBIAN_FRONTEND noninteractive
+
+ENV TZ=America/Mexico_City
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+### proxy for deb files
+# TODO use vagrant-cachier instead
+#RUN echo "Acquire::http::Proxy "\""${HTTP_PROXY}"\"";" \
+#  | tee  /etc/apt/apt.conf.d/01deb-proxy
+
+# Install packages needed for SSH and interactive OS
+RUN apt-get update && \
+    yes | unminimize && \
+    apt-get -y install \
+        openssh-server \
+        passwd \
+        sudo \
+        man-db \
+        curl \
+        wget \
+        vim-tiny && \
+    apt-get -qq clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+
+RUN apt-get update --yes
+RUN apt-get install --yes --no-install-recommends \
+  sudo \
+  iproute2 \
+  inetutils-ping \
+  ssh \
+  ;
+
+# Enable systemd (from Matthew Warman's mcwarman/vagrant-provider)
+RUN (cd /lib/systemd/system/sysinit.target.wants/; for i in *; do [ $i == systemd-tmpfiles-setup.service ] || rm -f $i; done); \
+    rm -f /lib/systemd/system/multi-user.target.wants/*; \
+    rm -f /etc/systemd/system/*.wants/*; \
+    rm -f /lib/systemd/system/local-fs.target.wants/*; \
+    rm -f /lib/systemd/system/sockets.target.wants/*udev*; \
+    rm -f /lib/systemd/system/sockets.target.wants/*initctl*; \
+    rm -f /lib/systemd/system/basic.target.wants/*; \
+    rm -f /lib/systemd/system/anaconda.target.wants/*;
+
+# Enable ssh for vagrant
+RUN systemctl enable ssh.service; 
+EXPOSE 22
+
+# Create the vagrant user
+RUN useradd --create-home -s /bin/bash $USER \
+  && echo -n "$USER:$USER" | chpasswd
+
+### add user 'vagrant' to group 'sudo'
+RUN usermod --append --groups sudo $USER
+RUN mkdir -p /etc/sudoers.d \
+  && echo "$USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/$USER \
+  && chmod 0440 /etc/sudoers.d/$USER
+
+# Establish ssh keys for vagrant
+RUN mkdir -p /home/$USER/.ssh \
+  && chmod 700 /home/$USER/.ssh
+###  This default 'insecure' key will be automatically replaced later when you initialize your virtual environment
+RUN echo "ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEA6NF8iallvQVp22WDkTkyrtvp9eWW6A8YVr+kz4TjGYe7gHzIw+niNltGEFHzD8+v1I2YJ6oXevct1YeS0o9HZyN1Q9qgCgzUFtdOKLv6IedplqoPkcmF0aYet2PkEDo3MlTBckFXPITAMzF8dJSIFo9D8HfdOV0IAdx4O7PtixWKn5y2hMNG0zQPyUecp4pzC6kivAIhyfHilFR61RGL+GPXQ2MWZWFYbAGjyiYJnAmCP3NOTd0jMZEnDkbUvxhMmBYSdETk1rRgm+R4LOzFUGaHqHDLKLX+FIPKcF96hrucXzcWyLbIbEgE98OHlnVYCzRdK8jlqm8tehUc9c9WhQ==" > /home/$USER/.ssh/authorized_keys
+#ADD https://raw.githubusercontent.com/hashicorp/vagrant/master/keys/vagrant.pub /home/vagrant/.ssh/authorized_keys
+RUN chmod 600 /home/$USER/.ssh/authorized_keys; \
+    chown -R $USER:$USER /home/$USER/.ssh
+
+RUN sed -i -e 's/Defaults.*requiretty/#&/' /etc/sudoers
+RUN sed -i -e 's/\(UsePAM \)yes/\1 no/' /etc/ssh/sshd_config
+
+### if threre is no systemd or service
+RUN mkdir /var/run/sshd
+
+#??
+#RUN apt-get -y install openssh-client
+
+RUN apt-get install --yes \
+  docker.io \
+  docker-buildx \
+  docker-compose-v2 \
+  ;
+# TODO test
+
+### add vagrant user to docker group
+#RUN delgroup ping
+#RUN delgroup $(grep $DOCKER_GID /etc/group | cut -d: -f1)
+#RUN delgroup docker
+
+### make 'docker' group with GID=host docker socket gid
+### fails on Windows PS
+#RUN groupmod --gid $DOCKER_GID docker
+
+### make 'docker'group
+### make 'docker' group with GID=host docker socket gid
+### fails on Windows PS
+#RUN groupadd --system --force --gid $DOCKER_GID docker \
+#  && usermod --append --groups docker $USER
+RUN usermod --append --groups docker $USER
+
+# Run the init daemon
+VOLUME [ "/sys/fs/cgroup" ]
+
+EXPOSE 22
+#CMD ["/usr/sbin/init"]
+CMD ["/usr/sbin/sshd", "-D"]
+#CMD ["/usr/sbin/init;/usr/sbin/sshd", "-D"]
+
+
+FROM vagrant AS python
+### install python3 (for ansible)
+WORKDIR /app
+RUN mkdir ./scripts
+COPY scripts/python_alt_versions.sh /app/scripts
+RUN apt-get update \
+  && apt-get install --yes 'python3' \
+  && apt-get install --yes "python3"-pip \
+  && "python3" -m pip install --upgrade pip \
+  && apt-get install --yes python-dev-is-python3 \
+  ;
+  ##&& sh app/scripts/python_alt_versions.sh
+RUN apt-get install --yes \
+  build-essential \
+  curl \
+  git \
+  libssl-dev \
+  libffi-dev \
+  python3-dev \
+  ;
+
+
+FROM python AS ansible
+RUN python3 -m pip install -VVV \
+  ansible==9.0.1 \
+  ;
+RUN echo "$(ansible --version)"
+#RUN sudo apt update \
+#  && sudo apt-get install --yes software-properties-common \
+#  && sudo add-apt-repository --yes --update ppa:ansible/ansible \
+#  && sudo apt-get install --yes ansible \
+#  ;
