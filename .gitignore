@@ -1,10 +1,13 @@
 !.gitignore
+*.swp
 
 # OS metadata files
 .DS_Store
 Thumbs.db
 
 # Vagrant metadata folder
+vagrant_var/
 .vagrant/
 
+tmp/
 !vault/

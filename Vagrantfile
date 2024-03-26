@@ -3,67 +3,69 @@
 #
 ##### https://dev.to/mattdark/using-docker-as-provider-for-vagrant-10me
 
-#DOCKER_GID = 121
-DOCKER_GID = `stat -c '%g' /var/run/docker.sock | tr -d '\n'`
-PROXY="http://10.0.2.2"
+# https://stackoverflow.com/questions/72151630/how-to-run-a-bash-script-on-wsl-with-powershell/72205311#72205311
+# https://stackoverflow.com/questions/26811089/vagrant-how-to-have-host-platform-specific-provisioning-steps
+if Vagrant::Util::Platform.windows?
+    # is windows
+    puts "Vagrant launched from windows."
+    # TODO test on Windows PS
+    DOCKER_GID = `wsl.exe stat -c '%g' //var/run/docker.sock | tr -d '\n'`
+    puts "vagrant host: /var/run/docker.sock is owned by GID #{DOCKER_GID}"
+elsif Vagrant::Util::Platform.darwin?
+    # is mac
+    puts "Vagrant launched from mac."
+elsif Vagrant::Util::Platform.linux?
+    # is linux
+    puts "Vagrant launched from linux."
+    #DOCKER_GID = 121
+    DOCKER_GID = `stat -c '%g' /var/run/docker.sock | tr -d '\n'`
+    puts "vagrant host: /var/run/docker.sock is owned by GID #{DOCKER_GID}"
+else
+    # is some other OS
+    puts "Vagrant launched from unknown platform."
+
+end
+
+
+PROXY_URL="http://10.0.2.2"
 PROXY_PORT="8000"
+PROXY="#{PROXY_URL}:#{PROXY_PORT}"
+PROXY=""
 
 
 Vagrant.configure("2") do |config|
-  config.vm.define "docker.dind", autostart: false do |dock|
-    dock.vm.hostname = "docker.dind"
-    dock.vm.provider  :docker do |d|
-      d.name = "docker.dind"
-      d.build_dir = "."
-      d.dockerfile = "Dockerfile.dind"
-      #d.build_args = ["--build-arg", "DOCKER_GID=121"]
-      d.build_args = ["--build-arg", "DOCKER_GID=#{DOCKER_GID}"]
-      d.remains_running = true
-      d.has_ssh = true
-      #d.create_args = ["-v", "/var/run/docker.sock:/var/run/docker.sock"]
-      d.create_args = ["--mount", "type=bind,source=//var/run/docker.sock,target=/var/run/docker.sock"]
-      #d.create_args = ["-v", "/home/def/vagrant_docker_provider2/file.txt:/file.txt:ro"]
-      #d.create_args = ["--mount", "type=bind,source=/home/def/vagrant_docker_provider2/file.txt,target=/file.txt,readonly"]
-      #d.ports = ["8800:8800"]
-    end
+    ### NOTE   OK on Windows PS with Docker Desktop through WSL2
+  config.vm.define "vagrant.systemd", autostart: true do |conf|
+    conf.vm.hostname = "vagrant.systemd"
 
-    #dock.vm.network "forwarded_port", guest: 4000, host: 4000
-#    config.vm.provision "docker" do |d|
-#      d.images = ["ubuntu"]
-#      #d.pull_images "mysql:latest"
-#      d.run "ubuntu",
-#        cmd: "bash -l",
-#        args: "-v '/vagrant:/var/www'"
-#      #d.run "mysql", args: "-e MYSQL_ROOT_PASSWORD=insecure", image: "mysql:latest"
-#    end
-  end
-
-
-  ### NOTE   OK on Windows PS with Docker Desktop through WSL2
-  config.vm.define "docker.ubuntu.dind", autostart: true do |dock|
-    dock.vm.hostname = "docker.ubuntu.dind"
-    dock.vm.provider  :docker do |d, override|
+    ############################################################
+    # Provider for Docker on Intel or ARM (aarch64)
+    ############################################################
+    conf.vm.provider :docker do |docker, override|
       override.vm.box = nil
+      docker.name = "vagrant.systemd"
+      #docker.image = ""
 #     docker.image = "rofrano/vagrant-provider:ubuntu"
-      d.name = "docker.ubuntu.dind"
-      d.build_dir = "."
-      d.dockerfile = "Dockerfile.ubuntu.dind"
-      d.build_args = ["--build-arg", "DOCKER_GID=#{DOCKER_GID}"]
-      d.remains_running = true
-      d.has_ssh = true
-      d.privileged = true
+      docker.build_dir = "."
+      docker.dockerfile = "Dockerfile.ssh"
+      docker.build_args = ["--build-arg", "DOCKER_GID=#{DOCKER_GID}"]
+      docker.remains_running = true
+      docker.has_ssh = true
 
-      d.volumes = ["//sys/fs/cgroup:/sys/fs/cgroup:rw"]
+      docker.privileged = true
+      docker.volumes = ["//sys/fs/cgroup:/sys/fs/cgroup:rw"]
+      docker.create_args = ["-t", "--cgroupns=host", "--security-opt", "seccomp=unconfined", "--tmpfs", "/tmp", "--tmpfs", "/run", "--tmpfs", "/run/lock", "--mount", "type=bind,source=//var/run/docker.sock,target=/var/run/docker.sock"]
+        #"--mount", "type=bind,source=//var/run/docker.sock,target=/var/run/docker.sock",
+        #"-v", "/sys/fs/cgroup:/sys/fs/cgroup:rw", #"--cgroupns=host", # Uncomment to force arm64 for testing images on Intel
+      # docker.create_args = ["--platform=linux/arm64", "--cgroupns=host"]
 
-      ### privileged dind needs host's dockerd socket
-      d.create_args = [
-        "--cgroupns=host",
-        "--mount", "type=bind,source=//var/run/docker.sock,target=/var/run/docker.sock"
-      ]
       #d.ports = ["8802:8802"]
     end
 
-    dock.vm.provision "ansible_local" do |ansible|
+    conf.vm.boot_timeout = 600
+    conf.vm.synced_folder ".", "/vagrant_data"
+
+    conf.vm.provision "ansible_local" do |ansible|
       ### https://developer.hashicorp.com/vagrant/docs/provisioning/ansible_local
       ansible.provisioning_path = "/vagrant_data"
       ansible.playbook = "playbook.yml"
@@ -73,12 +75,11 @@ Vagrant.configure("2") do |config|
       ansible.install_mode = "pip"
       #ansible.version = "2.2.1.0"
       ansible.pip_install_cmd = " \
-        https_proxy=#{PROXY}:#{PROXY_PORT} curl -s https://bootstrap.pypa.io/get-pip.py \
-        | sudo https_proxy=#{PROXY}:#{PROXY_PORT} python"
+        https_proxy=#{PROXY} curl -s https://bootstrap.pypa.io/get-pip.py \
+        | sudo https_proxy=#{PROXY} python"
     end
   end
 
-
-  config.vm.synced_folder ".", "/vagrant_data"
+  #config.vm.synced_folder ".", "/vagrant_data"
 
 end
