@@ -47,7 +47,8 @@ Vagrant.configure("2") do |config|
       #docker.image = ""
 #     docker.image = "rofrano/vagrant-provider:ubuntu"
       docker.build_dir = "."
-      docker.dockerfile = "Dockerfile.ssh"
+      #docker.dockerfile = "Dockerfile.ubuntu.dind"
+      docker.dockerfile = "Dockerfile.ubuntu.dind.vagrant.ansible"
       docker.build_args = ["--build-arg", "DOCKER_GID=#{DOCKER_GID}"]
       docker.remains_running = true
       docker.has_ssh = true
@@ -69,14 +70,18 @@ Vagrant.configure("2") do |config|
       ### https://developer.hashicorp.com/vagrant/docs/provisioning/ansible_local
       ansible.provisioning_path = "/vagrant_data"
       ansible.playbook = "playbook.yml"
+
       ansible.install = false
-      #iansible.version = "latest"
+        ### NOTE on Ubuntu 22.04:
+        ###  E: Package 'python-dev' has no installation candidate
+      #ansible.install = true
+      #ansible.version = "latest"
       #ansible.install_mode = "default"
       ansible.install_mode = "pip"
       #ansible.version = "2.2.1.0"
       ansible.pip_install_cmd = " \
         https_proxy=#{PROXY} curl -s https://bootstrap.pypa.io/get-pip.py \
-        | sudo https_proxy=#{PROXY} python"
+        | sudo https_proxy=#{PROXY} python3"
     end
   end
 
