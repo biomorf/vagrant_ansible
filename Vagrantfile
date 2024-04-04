@@ -64,7 +64,8 @@ Vagrant.configure("2") do |config|
     end
 
     conf.vm.boot_timeout = 600
-    conf.vm.synced_folder ".", "/vagrant_data"
+    conf.vm.synced_folder ".", "/vagrant_data", owner: "vagrant",
+      group: "vagrant", mount_options: ["uid=2000", "gid=2000"]
 
     conf.vm.provision "ansible_local" do |ansible|
       ### https://developer.hashicorp.com/vagrant/docs/provisioning/ansible_local
@@ -83,6 +84,16 @@ Vagrant.configure("2") do |config|
         https_proxy=#{PROXY} curl -s https://bootstrap.pypa.io/get-pip.py \
         | sudo https_proxy=#{PROXY} python3"
     end
+
+    conf.vm.provision "start_dev", type: "shell", run: "always",
+      privileged: "no",
+      upload_path: '/home/vagrant/preflight.sh',
+      inline: "/bin/bash /vagrant_data/test.sh"
+
+      #privileged: "true",
+      #upload_path: '/test/preflight.sh',
+
+      #upload_path: '/vagrant_data/preflight.sh',
   end
 
   #config.vm.synced_folder ".", "/vagrant_data"

@@ -104,6 +104,9 @@ FROM  sshd AS vagrant
 ARG USER=vagrant
 
 # Create the vagrant user
+  ### if linux
+#RUN useradd --uid '1000' --create-home -s /bin/bash $USER \
+  ### if Windows
 RUN useradd --uid '2000' --create-home -s /bin/bash $USER \
   && echo -n "$USER:$USER" | chpasswd
 
@@ -199,3 +202,4 @@ RUN echo "$(ansible --version)"
   #  && sudo add-apt-repository --yes --update ppa:ansible/ansible \
   #  && sudo apt-get install --yes ansible \
   #  ;
+RUN mkdir /test && chown "${USER}:" /test
